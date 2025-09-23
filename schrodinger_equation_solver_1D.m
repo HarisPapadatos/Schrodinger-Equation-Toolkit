@@ -1,47 +1,76 @@
-clc; close all;
+clc; clear; close all;
 
-% functions & constants
+% ==========================================
+% ||          required scripts            ||
+% ==========================================
 
-function L = laplacian1D(n, width)
-    h = width/(n+1);
-    e = ones(n,1);
-    L = spdiags([e -2*e e], -1:1, n, n) / h^2;
-end
+% Calculus;
+% Units;
+% Modes;
 
-SI_units = {1.0545e-34 9.109e-31 'J'};
-eV_units = {6.582e-16 5.109e5 'eV'};
-dimensionless = {1 0.5 ''};
+Units.initialize();
 
-% input
+% ==========================================
+% ||               input                  ||
+% ==========================================
 
-%system
-[hbar, m0, energy_units] = dimensionless{:};
-resolution = 400;
-bounds = [-50 50]; % width = 1e-10 m 
+% units
+% ---------------------------------------
+energy_units = 'ev';
+distance_units = 'nm';
+time_units = 's';
+mass_units = 'me';
 
-x = linspace(bounds(1), bounds(2), resolution+2);
+% system
+% ---------------------------------------
+mass = 1;
+periodic = false;
+bounds = [-0.25-0.125 0.375+0.125];
+
+
+% simulation quaity
+% -----------------------------------------
+resolution = 3000;
+
+
+% potential energy
+% ---------------------------------------
 
 descrete_potential = true; 
 % for descrete potential
-potential_deviders = [10 20 30];
-potential_values = [0 0.2 0 0.2];
+potential_dividers = [-0.25 -0.125 0 0.125 0.25 0.375];
+potential_values = [50 0 50 0 50 0 50];
+
 % for continuous potential
-potential = x.^2/1000;
+potential_function = @(x) 0.5*mass*2*pi*5e10*Units.hz*x^2;
 
 
 % display
-display_states = [4:8];
+% -----------------------------------------
+display_states = [3];
 display_energies = true;
 display_wavefunctions = true;
-display_wavefunction_multiplier = 0.05;
+display_wavefunction_multiplier = 5;
 
 mode = Mode.eigenstate;
+show_energy_levels = true;
 
-%% Setting up
+%% Calculation
+
+% calculating units;
+bounds=bounds                                   *Units.value(distance_units); 
+potential_dividers=potential_dividers           *Units.value(distance_units);
+potential_values=potential_values               *Units.value(energy_units);
+potential_function = @(x) potential_function(x) *Units.value(energy_units);
+mass = mass                                     *Units.value(mass_units);
+
+
+
+x = linspace(bounds(1), bounds(2), resolution+2);
 dx = x(2)-x(1);
 x_interior = x(2:end-1);
 box_size = bounds(2)-bounds(1);
-deviders = [bounds(1), potential_deviders, bounds(2)];
+deviders = [bounds(1), potential_dividers, bounds(2)];
 
 if length(deviders) ~= size(potential_values)+1
     error("There is not exactly one potential value for every region of space");
@@ -51,7 +80,7 @@ if bounds(2) <= bounds(1)
     error("The second bound must be to the right");
 end
 
-KE_opr = -hbar^2/(2*m0)*laplacian1D(resolution, box_size); 
+KE_opr = -Units.hbar^2/(2*mass)*Calculus.laplacian1D(resolution, box_size, periodic); 
 PE_opr = zeros(resolution, resolution);
 
 current_region = 0;
@@ -63,12 +92,14 @@ if descrete_potential
             current_region = current_region + 1;
         end
         
-        PE_opr(i, i) = potential_values(current_region);
+        potential(i) = potential_values(current_region);
     
     end
 else
-    PE_opr = diag(potential(2:(end-1)));
+    potential = arrayfun(potential_function,x);
 end
+
+PE_opr = diag(potential(1:end));
 
 hamiltonian = KE_opr + PE_opr;
 
@@ -77,9 +108,16 @@ hamiltonian = KE_opr + PE_opr;
 
 
 %% Plotting
-clc; close all;
 
+% returning back the original values
+bounds=bounds                                   /Units.value(distance_units); 
+potential = potential                           /Units.value(energy_units);
+mass = mass                                     /Units.value(mass_units);
+
+% sizing
 eigen_energies = diag(D)';
+
+display_wavefunction_multiplier = display_wavefunction_multiplier*0.04;
 
 max_energy_displayed = max(eigen_energies(display_states));
 min_energy_displayed = min(eigen_energies(display_states));
@@ -93,7 +131,7 @@ if descrete_potential
 else
     max_potential_displayed = max(potential);
     min_potential_displayed = min(potential);
-       potential_left = potential(1);
+    potential_left = potential(1);
     potential_right = potential(end);
 end
 
@@ -123,12 +161,15 @@ screenheight = max_point_displayed-min_point;
 V=V./ sqrt(sum(abs(V).^2, 1)/resolution);
 
 
-
 figure; hold on;
 
 if mode == Mode.eigenstate || mode == Mode.probability 
     for i = display_states
-        psi = [0;V(:,i);0];
+        if ~periodic
+            psi = [0;V(:,i);0];
+        else
+            psi = V(:,i);
+        end
 
         func = psi*screenheight/sqrt(amount_displayed)*display_wavefunction_multiplier;
 
@@ -140,34 +181,42 @@ if mode == Mode.eigenstate || mode == Mode.probability
 
         if display_energies
             energy_line = eigen_energies(i);
-            text(bounds(2)+box_size*0.02, energy_line, sprintf('E_{%i}= %.3e %s',i ,eigen_energies(i), energy_units), 'Color', 'r', 'FontSize', 10);
+            text(bounds(2)+box_size*0.02, energy_line, sprintf('E_{%i}= %.3e %s',i ,eigen_energies(i), Units.display(energy_units)), 'Color', 'r', 'FontSize', 10);
             line([bounds(1) bounds(2)],[1 1]*energy_line,'Color','r','LineStyle','--');
             func = func + energy_line;
         end
 
         if display_wavefunctions
+            if periodic
+                plot(x_interior,func,'b');
+            else
                 plot(x,func,'b');
+            end
         end
 
     end
 end
 
-line([bounds(1), bounds(1)],[potential_left height],'Color','k');
-line([bounds(2), bounds(2)],[potential_right height],'Color','k');
-
-if descrete_potential
-    for i = 1:(length(deviders)-1)
-        line([deviders(i) deviders(i+1)],[1 1]*potential_values(i),'Color','k');
-    
-        if i ~=length(deviders)-1
-            line([deviders(i+1) deviders(i+1)],[potential_values(i) potential_values(i+1)],'Color','k');
-        end
-    end
+if ~periodic
+    line([bounds(1), bounds(1)],[potential_left height],'Color','k');
+    line([bounds(2), bounds(2)],[potential_right height],'Color','k');
 else
-    plot(x,potential,'k');
+    line([bounds(1), bounds(1)],[potential_left potential_right],'Color','k');
+    line([bounds(2), bounds(2)],[potential_right potential_left],'Color','k');
 end
 
 
-xlim([bounds(1)-box_size*0.1 bounds(2)+box_size*0.1]);
-ylim([min_point max_point_displayed]);
 
+plot(x(2:end-1),potential(1:end),'k');
+
+
+%xlim([bounds(1)-box_size*0.1 bounds(2)+box_size*0.1]);
+%ylim([min_point max_point_displayed]);
+
+%xlim([-0.3 0.375+0.05]);
+%ylim([-5 55]);
+
+grid on;
+title("Wavefunction plots over the potential");
+xlabel(sprintf('Position: x (%s)', Units.display(distance_units)));
+ylabel(sprintf('Energy: E (%s)', Units.display(energy_units)));
